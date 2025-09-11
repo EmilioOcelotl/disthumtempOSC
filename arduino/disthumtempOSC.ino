@@ -1,8 +1,6 @@
-#include <SPI.h>
 #include <WiFiS3.h>
 #include <ArduinoOSCWiFi.h>
 #include "arduino_secrets.h"  
-#include "Adafruit_VL53L0X.h"
 #include <DHT.h>
 
 // ---- CONFIG WIFI ----
@@ -19,16 +17,8 @@ const int bind_port = 54345;         // puerto local OSC (opcional si recibes)
 #define DHTPIN 2
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
-Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 
 // ---- Variables ----
-const int numLecturas = 2;
-int lecturas[numLecturas] = {0};
-int indiceLectura = 0;
-bool lleno = false;
-
-const int UMBRAL_MM = 200;
-
 float humedad = 0;
 float temperatura = 0;
 
@@ -40,11 +30,6 @@ void setup() {
   delay(1000);
 
   dht.begin();
-  if (!lox.begin()) {
-    Serial.println(F("Error al iniciar VL53L0X"));
-    while (1);
-  }
-
   connectToWiFi();
 }
 
@@ -66,40 +51,16 @@ void loop() {
       humedad = h;
       temperatura = t;
     }
+
+    // ---- FORMATO MENSAJE ----
+    String mensaje = String(humedad) + "|" + String(temperatura);
+
+    // Imprimir en Serial
+    Serial.println(mensaje);
+
+    // Enviar vía OSC
+    OscWiFi.send(host, send_port, "/sensores", mensaje);
   }
-
-  // ---- LECTURA VL53L0X ----
-  VL53L0X_RangingMeasurementData_t measure;
-  lox.rangingTest(&measure, false);
-
-  int promedio = 0;
-  int trigger = 0;
-
-  if (measure.RangeStatus != 4) {
-    int distancia = measure.RangeMilliMeter;
-    lecturas[indiceLectura] = distancia;
-    indiceLectura = (indiceLectura + 1) % numLecturas;
-    if (indiceLectura == 0) lleno = true;
-
-    int total = 0;
-    int n = lleno ? numLecturas : indiceLectura;
-    for (int i = 0; i < n; i++) total += lecturas[i];
-    promedio = total / n;
-
-    if (promedio <= UMBRAL_MM) trigger = 1;
-  }
-
-  // ---- FORMATO MENSAJE ----
-  String mensaje = String(promedio) + "|" +
-                   String(humedad) + "|" +
-                   String(temperatura) + "|" +
-                   String(trigger);
-
-  // Imprimir en Serial
-  Serial.println(mensaje);
-
-  // Enviar vía OSC
-  OscWiFi.send(host, send_port, "/sensores", mensaje);
 
   delay(20); // estabilidad
 }
