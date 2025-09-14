@@ -17,4 +17,10 @@ python3 -m venv nombreDelEntorno
 ```
 source nombreDelEntorno/bin/activate
 ```
+## SuperCollider
 
+Para ejecutar sclang sin pantalla: 
+
+```
+QT_QPA_PLATFORM=offscreen sclang optical.scd
+```
