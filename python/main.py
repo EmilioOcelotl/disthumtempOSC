@@ -9,7 +9,7 @@ def main():
         return
 
     # Cliente OSC
-    client = udp_client.SimpleUDPClient("192.168.1.80", 57120)
+    client = udp_client.SimpleUDPClient("127.0.0.1", 57120)
 
     # Parámetros para detectar esquinas
     feature_params = dict(maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7)
