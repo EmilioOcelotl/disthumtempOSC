@@ -1,0 +1,16 @@
+// test.scd - prueba de audio headless Raspberry Pi con USB Audio CODEC
+(
+s = Server.default;
+
+// Configurar salida a tu USB Audio CODEC
+s.options.device = "hw:3,0";
+
+s.boot;
+
+s.waitForBoot {
+    "Servidor iniciado. Reproduciendo tono de prueba 440Hz en USB Audio CODEC.".postln;
+
+    // Síntesis simple de prueba
+    ~testSynth = { SinOsc.ar(440, 0, 0.5) ! 2 }.play;
+};
+)
