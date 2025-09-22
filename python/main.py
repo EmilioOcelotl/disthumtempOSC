@@ -24,7 +24,20 @@ def main():
         print("Error: No se pudo leer el primer frame")
         return
 
+    # Convertir a escala de grises
     old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
+
+    # Mejoras: aplicar CLAHE + blur
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    old_gray = clahe.apply(old_gray)
+    old_gray = cv2.GaussianBlur(old_gray, (5, 5), 0)
+
+    # Región de interés (ROI) opcional
+    use_roi = False  # cambia a True si quieres usarla
+    if use_roi:
+        x1, y1, x2, y2 = 100, 200, 1000, 600  # ajusta a tu zona
+        old_gray = old_gray[y1:y2, x1:x2]
+
     p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **feature_params)
 
     frame_count = 0
@@ -35,6 +48,11 @@ def main():
                 break
 
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            frame_gray = clahe.apply(frame_gray)
+            frame_gray = cv2.GaussianBlur(frame_gray, (5, 5), 0)
+
+            if use_roi:
+                frame_gray = frame_gray[y1:y2, x1:x2]
 
             # Re-inicializar p0 si es None o vacío
             if p0 is None or len(p0) == 0:
@@ -51,7 +69,8 @@ def main():
                     displacements = good_new - good_old
                     magnitudes = np.linalg.norm(displacements, axis=1)
 
-                    avg_magnitude = np.mean(magnitudes) if len(magnitudes) > 0 else 0.0
+                    # Usar mediana para mayor robustez
+                    avg_magnitude = np.median(magnitudes) if len(magnitudes) > 0 else 0.0
                 else:
                     avg_magnitude = 0.0
             else:
@@ -59,7 +78,7 @@ def main():
 
             frame_count += 1
             if frame_count % 5 == 0:
-                print(f"Frame {frame_count}: magnitud promedio = {avg_magnitude:.4f}")
+                print(f"Frame {frame_count}: magnitud mediana = {avg_magnitude:.4f}")
 
             # Enviar OSC cada frame
             client.send_message("/flow", float(avg_magnitude))
