@@ -29,26 +29,22 @@ def main():
         return
 
     old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
-
-    # CLAHE + blur
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     old_gray = clahe.apply(old_gray)
     old_gray = cv2.GaussianBlur(old_gray, (5, 5), 0)
 
-    # Región de interés opcional
     use_roi = False
     if use_roi:
         x1, y1, x2, y2 = 100, 200, 1000, 600
         old_gray = old_gray[y1:y2, x1:x2]
 
     p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **feature_params)
-
     frame_count = 0
 
     # ---- Configuración DHT ----
     dht_device = adafruit_dht.DHT11(board.D4)  # GPIO4
     ultima_lectura_dht = 0
-    intervalo_dht = 2  # segundos
+    intervalo_dht = 10  # segundos para capa contemplativa
 
     try:
         while True:
@@ -67,6 +63,7 @@ def main():
             if p0 is None or len(p0) == 0:
                 p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **feature_params)
 
+            # --- Cálculo de flujo óptico ---
             if p0 is not None and len(p0) > 0:
                 p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
                 if p1 is not None:
@@ -84,21 +81,36 @@ def main():
             if frame_count % 5 == 0:
                 print(f"Frame {frame_count}: magnitud mediana = {avg_magnitude:.4f}")
 
-            # --- Sensor DHT ---
+            # --- Enviar magnitud de flujo óptico ---
+            client.send_message("/flow", float(avg_magnitude))
+
+            # --- Lectura DHT cada intervalo_dht segundos ---
             tiempo_actual = time.time()
             if tiempo_actual - ultima_lectura_dht >= intervalo_dht:
                 ultima_lectura_dht = tiempo_actual
-                try:
-                    temperatura = dht_device.temperature
-                    humedad = dht_device.humidity
-                    if temperatura is not None and humedad is not None:
-                        print(f"Temp={temperatura}C  Humedad={humedad}%")
-                        client.send_message("/sensores", [humedad, temperatura])
-                except RuntimeError as e:
-                    print(f"Error lectura DHT: {e}")
+                temperatura_valida = None
+                humedad_valida = None
 
-            # --- Enviar OSC magnitud flujo óptico ---
-            client.send_message("/flow", float(avg_magnitude))
+                # Reintentos hasta 3
+                for intento in range(3):
+                    try:
+                        temp = dht_device.temperature
+                        hum = dht_device.humidity
+                        if temp is not None and hum is not None:
+                            temperatura_valida = float(temp)
+                            humedad_valida = float(hum)
+                            break  # lectura válida, salir del loop
+                    except RuntimeError as e:
+                        print(f"Error lectura DHT (intento {intento+1}): {e}")
+                        time.sleep(0.5)
+
+                # Enviar solo si ambos valores son válidos
+                if temperatura_valida is not None and humedad_valida is not None:
+                    print(f"Temp={temperatura_valida}C  Humedad={humedad_valida}%")
+                    client.send_message("/temperatura", temperatura_valida)
+                    client.send_message("/humedad", humedad_valida)
+                else:
+                    print("No se obtuvo lectura válida de DHT después de 3 intentos.")
 
             # Preparar siguiente frame
             old_gray = frame_gray.copy()

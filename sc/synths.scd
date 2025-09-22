@@ -2,56 +2,52 @@ s.waitForBoot {
     "Servidor iniciado".postln;
 
     // -----------------------------
-    // Flow Noise
+    // Flow Noise y gotas originales
     // -----------------------------
     SynthDef(\flowNoise, { |amp=0.5, cutoff=500, bassFreq=80, out=0|
         var sig, cutoffLag, bass;
-
         cutoffLag = Lag.kr(cutoff, 1);
-
         sig = PinkNoise.ar(0.3);
         sig = LPF.ar(sig, cutoffLag);
-
         bass = SinOsc.ar(Lag.kr(bassFreq, 0.3), 0, 0.2)
              + SinOsc.ar(Lag.kr(bassFreq*0.5, 0.5), 0, 0.1);
-
         bass = bass * (0.8 + LFNoise1.kr(0.5).range(0.7, 1.0));
-
         sig = (sig * 0.8) + (bass * 0.8);
-
-        Out.ar(out, sig!2); // salida original
+        Out.ar(out, sig!2);
     }).add;
 
-    // -----------------------------
-    // FreeVerb para Flow Noise
-    // -----------------------------
     SynthDef(\flowReverb, { |in=0, out=0, mix=0.5, room=0.7, damp=0.5|
         var sig = In.ar(in, 2);
         var rev = FreeVerb.ar(sig, mix: mix, room: room, damp: damp);
         Out.ar(out, rev);
     }).add;
 
-    // -----------------------------
-    // Pulsos con FreeVerb
-    // -----------------------------
     SynthDef(\sensorPulseRev, { |freq=100, amp=0.3, dur=0.25, out=0|
         var env, sig, rev;
-
         env = EnvGen.kr(Env.perc(0.01, dur, 1, -4));
         sig = SinOsc.ar(freq) * env * amp;
-
         rev = FreeVerb.ar(sig, mix:0.5, room:0.8, damp:0.5);
-
         Out.ar(out, rev!2);
     }).add;
 
     // -----------------------------
-    // Instancia flujo
+    // Pulsos sintéticos tipo beep agudo
+    // -----------------------------
+    SynthDef(\beepPulseSynth, { |freq=2500, amp=0.2, dur=0.12, wave=0, out=0|
+        var sig;
+        sig = Select.ar(wave, [
+            Saw.ar(freq, amp),   // triangular/sawe
+            Pulse.ar(freq, 0.5, amp) // cuadrada
+        ]);
+        sig = sig * EnvGen.kr(Env.perc(0.001, dur, 1, 0), doneAction: 2); // pulso casi plano
+        Out.ar(out, sig!2);
+    }).add;
+
+    // -----------------------------
+    // Instancias iniciales
     // -----------------------------
     s.sync;
     ~flowSynth = Synth(\flowNoise);
-
-    // Envía flowNoise al reverb
     ~flowRev = Synth(\flowReverb, [\in, 0, \mix, 0.3, \room, 0.7, \damp, 0.5]);
 
     // -----------------------------
@@ -61,12 +57,9 @@ s.waitForBoot {
         var flow, cutoff, bassFreq;
         if(msg.notEmpty) {
             flow = msg[1].asFloat;
-
             cutoff = flow.linlin(0, 50, 50, 4000).clip(50, 4000);
-            ~flowSynth.set(\cutoff, cutoff);
-
             bassFreq = flow.linlin(0, 50, 40, 200).clip(40, 200);
-            ~flowSynth.set(\bassFreq, bassFreq);
+            ~flowSynth.set(\cutoff, cutoff, \bassFreq, bassFreq);
 
             if(flow > 30) {
                 Synth(\sensorPulseRev, [
@@ -78,41 +71,29 @@ s.waitForBoot {
         };
     }, '/flow');
 
+    // Humedad - beep más perceptible
     OSCFunc({ |msg, time, addr, recvPort|
-        var hum, freq;
+        var hum, freq, amp, dur;
         if(msg.notEmpty) {
             hum = msg[0].asFloat;
-            freq = hum.linlin(0, 100, 60, 120);
-            Synth(\sensorPulseRev, [\freq, freq, \amp, 0.2, \dur, 0.2]);
+            freq = hum.linlin(0, 100, 2500, 3500); // más agudo que gotas
+            amp  = hum.linlin(0, 100, 0.15, 0.25); // más audible
+            dur  = 0.10 + (hum/100*0.08);          // corto pero presente
+            Synth(\beepPulseSynth, [\freq, freq, \amp, amp, \dur, dur, \wave, 1]); // cuadrada
         };
     }, '/humedad');
 
+    // Temperatura - beep más perceptible
     OSCFunc({ |msg, time, addr, recvPort|
-        var temp, freq;
+        var temp, freq, amp, dur;
         if(msg.notEmpty) {
             temp = msg[0].asFloat;
-            freq = temp.linlin(0, 40, 120, 200);
-            Synth(\sensorPulseRev, [\freq, freq, \amp, 0.2, \dur, 0.2]);
+            freq = temp.linlin(0, 40, 2600, 3800);
+            amp  = temp.linlin(0, 40, 0.15, 0.25);
+            dur  = 0.10 + (temp/40*0.08);
+            Synth(\beepPulseSynth, [\freq, freq, \amp, amp, \dur, dur, \wave, 0]); // triangular
         };
     }, '/temperatura');
 
-    "Listeners OSC iniciados".postln;
-
-    // -----------------------------
-    // Escenas temporales
-    // -----------------------------
-    (
-    Routine({
-        loop {
-            ~flowSynth.set(\amp, 0.5, \cutoff, 800);
-            300.wait;
-
-            ~flowSynth.set(\amp, 0.5, \cutoff, 2000);
-            300.wait;
-
-            ~flowSynth.set(\amp, 0.6, \cutoff, 400);
-            300.wait;
-        }
-    }).play;
-    )
+    "Listeners OSC beeps agudos iniciados".postln;
 };
