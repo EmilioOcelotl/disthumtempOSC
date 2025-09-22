@@ -1,8 +1,12 @@
+import time
 import cv2
 import numpy as np
+import board
+import adafruit_dht
 from pythonosc import udp_client
 
 def main():
+    # ---- Configuración cámara ----
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Error: No se pudo abrir la cámara")
@@ -24,25 +28,31 @@ def main():
         print("Error: No se pudo leer el primer frame")
         return
 
-    # Convertir a escala de grises
     old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
 
-    # Mejoras: aplicar CLAHE + blur
+    # CLAHE + blur
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     old_gray = clahe.apply(old_gray)
     old_gray = cv2.GaussianBlur(old_gray, (5, 5), 0)
 
-    # Región de interés (ROI) opcional
-    use_roi = False  # cambia a True si quieres usarla
+    # Región de interés opcional
+    use_roi = False
     if use_roi:
-        x1, y1, x2, y2 = 100, 200, 1000, 600  # ajusta a tu zona
+        x1, y1, x2, y2 = 100, 200, 1000, 600
         old_gray = old_gray[y1:y2, x1:x2]
 
     p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **feature_params)
 
     frame_count = 0
+
+    # ---- Configuración DHT ----
+    dht_device = adafruit_dht.DHT11(board.D4)  # GPIO4
+    ultima_lectura_dht = 0
+    intervalo_dht = 2  # segundos
+
     try:
         while True:
+            # --- Cámara ---
             ret, frame = cap.read()
             if not ret:
                 break
@@ -54,22 +64,16 @@ def main():
             if use_roi:
                 frame_gray = frame_gray[y1:y2, x1:x2]
 
-            # Re-inicializar p0 si es None o vacío
             if p0 is None or len(p0) == 0:
                 p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **feature_params)
 
             if p0 is not None and len(p0) > 0:
-                # Calcular Optical Flow
                 p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
-
                 if p1 is not None:
                     good_new = p1[st == 1]
                     good_old = p0[st == 1]
-
                     displacements = good_new - good_old
                     magnitudes = np.linalg.norm(displacements, axis=1)
-
-                    # Usar mediana para mayor robustez
                     avg_magnitude = np.median(magnitudes) if len(magnitudes) > 0 else 0.0
                 else:
                     avg_magnitude = 0.0
@@ -80,16 +84,28 @@ def main():
             if frame_count % 5 == 0:
                 print(f"Frame {frame_count}: magnitud mediana = {avg_magnitude:.4f}")
 
-            # Enviar OSC cada frame
+            # --- Sensor DHT ---
+            tiempo_actual = time.time()
+            if tiempo_actual - ultima_lectura_dht >= intervalo_dht:
+                ultima_lectura_dht = tiempo_actual
+                try:
+                    temperatura = dht_device.temperature
+                    humedad = dht_device.humidity
+                    if temperatura is not None and humedad is not None:
+                        print(f"Temp={temperatura}C  Humedad={humedad}%")
+                        client.send_message("/sensores", [humedad, temperatura])
+                except RuntimeError as e:
+                    print(f"Error lectura DHT: {e}")
+
+            # --- Enviar OSC magnitud flujo óptico ---
             client.send_message("/flow", float(avg_magnitude))
 
-            # Preparar para siguiente frame
+            # Preparar siguiente frame
             old_gray = frame_gray.copy()
             p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **feature_params)
 
     except KeyboardInterrupt:
         print("Interrumpido por el usuario.")
-
     finally:
         cap.release()
         print("Cámara liberada. Programa terminado.")
