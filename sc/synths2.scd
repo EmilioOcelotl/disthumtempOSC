@@ -55,7 +55,7 @@ s.waitForBoot {
     // SYNTH PARA FADEOUT SUAVE
     SynthDef(\fadeOut, { |out=0, dur=3.0|
         var env = EnvGen.kr(Env([1, 1, 0], [dur-0.1, 0.1], \sin), doneAction: 2);
-        Out.ar(out, Silent.ar(2) * env); // Silencio con envelope
+        Out.ar(out, Silent.ar(2) * env);
     }).add;
 
     s.sync;
@@ -68,11 +68,11 @@ s.waitForBoot {
     ~ultimaTemp = 20;
     ~ultimaHum = 50;
     ~fadeOutSynth = nil;
-    
+
     // Instancias persistentes
     ~vibracionBase = Synth(\vibracionBase, [\freq, 60, \amp, 0.08]);
     ~subVibracion = Synth(\subVibracion, [\freq, 35, \amp, 0.05]);
-    
+
     "Synths de vibración iniciados".postln;
 
     // -----------------------------
@@ -82,49 +82,54 @@ s.waitForBoot {
         var modos = ["NORMAL", "ZOOM", "SILENCIO"];
         var modoAnterior = ~modoActual;
         ~modoActual = nuevoModo;
-        
+
         ("=== MODO CAMBIADO: " ++ modos[modoAnterior] ++ " → " ++ modos[nuevoModo] ++ " ===").postln;
-        
+
         switch(nuevoModo,
             0, { // NORMAL - Solo vibración suave, SIN cracks
                 // Fade in suave si veníamos de silencio
-                if(modoAnterior == 2) {
+                if(modoAnterior == 2, {
+                    ~vibracionBase.free; // liberar instancia previa por si quedó
+                    ~subVibracion.free;
                     ~vibracionBase = Synth(\vibracionBase, [\freq, 60, \amp, 0, \gate, 1]);
                     ~subVibracion = Synth(\subVibracion, [\freq, 35, \amp, 0, \gate, 1]);
                     // Fade in progresivo
                     ~vibracionBase.set(\amp, 0.08, \freq, 60);
                     ~subVibracion.set(\amp, 0.05, \freq, 35);
-                } {
-                    // Transición normal desde zoom
-                    if(~vibracionBase.isPlaying.not, { 
-                        ~vibracionBase = Synth(\vibracionBase, [\freq, 60, \amp, 0.08]) 
+                }, {
+                    // Transición normal desde zoom u otro estado
+                    if(~vibracionBase.isPlaying.not, {
+                        ~vibracionBase = Synth(\vibracionBase, [\freq, 60, \amp, 0.08]);
                     });
-                    if(~subVibracion.isPlaying.not, { 
-                        ~subVibracion = Synth(\subVibracion, [\freq, 35, \amp, 0.05]) 
+                    if(~subVibracion.isPlaying.not, {
+                        ~subVibracion = Synth(\subVibracion, [\freq, 35, \amp, 0.05]);
                     });
-                };
-            },
-            
-            1, { // ZOOM - Vibración intensa + CRACKS
-                if(~vibracionBase.isPlaying, { 
-                    ~vibracionBase.set(\amp, 0.12) 
-                }}
-                    ~vibracionBase = Synth(\vibracionBase, [\freq, 60, \amp, 0.12])
+                    // asegurar amplitud de referencia
+                    ~vibracionBase.set(\amp, 0.08);
+                    ~subVibracion.set(\amp, 0.05);
                 });
-                
-                if(~subVibracion.isPlaying, { 
-                    ~subVibracion.set(\amp, 0.08) 
-                } {
-                    ~subVibracion = Synth(\subVibracion, [\freq, 35, \amp, 0.08])
-                };
-                
+            },
+
+            1, { // ZOOM - Vibración intensa + CRACKS
+                if(~vibracionBase.isPlaying, {
+                    ~vibracionBase.set(\amp, 0.12);
+                }, {
+                    ~vibracionBase = Synth(\vibracionBase, [\freq, 60, \amp, 0.12]);
+                });
+                if(~subVibracion.isPlaying, {
+                    ~subVibracion.set(\amp, 0.08);
+                }, {
+                    ~subVibracion = Synth(\subVibracion, [\freq, 35, \amp, 0.08]);
+                });
+
                 "🎛️  CRACKS ACTIVADOS (solo en ZOOM)".postln;
             },
-            
+
             2, { // SILENCIO ABSOLUTO - Con crossfade
                 // Fade out suave de 3 segundos
+                if(~fadeOutSynth.notNil, { ~fadeOutSynth.free });
                 ~fadeOutSynth = Synth(\fadeOut, [\dur, 3.0]);
-                
+
                 // Apagar synths después del fade
                 SystemClock.sched(3.0, {
                     if(~vibracionBase.isPlaying, { ~vibracionBase.set(\gate, 0) });
@@ -132,13 +137,13 @@ s.waitForBoot {
                     "🔇 SILENCIO ABSOLUTO ACTIVADO".postln;
                 });
             }
-        );
+        ); // end switch
     };
 
     // -----------------------------
     // LISTENERS OSC - CRACKS SOLO EN ZOOM
     // -----------------------------
-    
+
     // Modo del sistema
     OSCFunc({ |msg|
         var modo = msg[1].asInteger;
@@ -151,19 +156,19 @@ s.waitForBoot {
     OSCFunc({ |msg|
         var flow = msg[1].asFloat;
         ~ultimoFlow = flow;
-        
+
         if (~modoActual != 2) { // No en silencio
             var freqBase = flow.linlin(0, 30, 40, 120).clip(40, 120);
             var freqSub = flow.linlin(0, 30, 25, 60).clip(25, 60);
             var ampBase = flow.linlin(0, 30, 0.05, 0.15).clip(0.05, 0.15);
-            
-            if(~vibracionBase.isPlaying, { 
-                ~vibracionBase.set(\freq, freqBase, \amp, ampBase) 
+
+            if(~vibracionBase.isPlaying, {
+                ~vibracionBase.set(\freq, freqBase, \amp, ampBase)
             });
-            if(~subVibracion.isPlaying, { 
-                ~subVibracion.set(\freq, freqSub) 
+            if(~subVibracion.isPlaying, {
+                ~subVibracion.set(\freq, freqSub)
             });
-            
+
             // 🎯 CRACKS SOLO EN MODO ZOOM
             if ((~modoActual == 1) && (flow > 5)) {
                 Synth(\crackZoom, [
@@ -195,10 +200,10 @@ s.waitForBoot {
     OSCFunc({ |msg|
         var temp = msg[1].asFloat;
         ~ultimaTemp = temp;
-        
+
         if (~modoActual != 2) { // No en silencio
             var probBleep = temp.linlin(15, 35, 0.1, 0.8);
-            
+
             // Bleeps en NORMAL y ZOOM
             if (probBleep.coin) {
                 Synth(\bleepDigital, [
@@ -208,7 +213,7 @@ s.waitForBoot {
                     \pan, 1.0.rand2
                 ]);
             };
-            
+
             // Notificación de vida (más suave)
             Synth(\notificacionVida, [
                 \freq, temp.linlin(15, 35, 800, 1200),
@@ -223,9 +228,9 @@ s.waitForBoot {
     OSCFunc({ |msg|
         var hum = msg[1].asFloat;
         ~ultimaHum = hum;
-        
-        if (~modoActual != 2) { // 🎯 VERIFICACIÓN COMPLETA
-            if (0.3.coin) { // Bleeps originales
+
+        if (~modoActual != 2) {
+            if (0.3.coin) {
                 Synth(\bleepDigital, [
                     \freq, hum.linlin(30, 80, 2000, 3500),
                     \amp, hum.linlin(30, 80, 0.15, 0.25),
@@ -233,8 +238,7 @@ s.waitForBoot {
                     \pan, 1.0.rand2
                 ]);
             };
-            
-            // Notificación de vida
+
             Synth(\notificacionVida, [
                 \freq, hum.linlin(30, 80, 900, 1100),
                 \amp, 0.03,
@@ -253,7 +257,7 @@ s.waitForBoot {
         "Modo: %".format(modos[~modoActual]).postln;
         "Flow: %".format(~ultimoFlow.round(0.01)).postln;
         "Temp: %°C".format(~ultimaTemp).postln;
-        "Hum: %%".format(~ultimaHum).postln;
+        ("Hum: " ++ ~ultimaHum.asString ++ "%").postln;
         "Cracks: %".format(if(~modoActual == 1, "ACTIVOS", "INACTIVOS")).postln;
     };
 
