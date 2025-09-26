@@ -1,27 +1,19 @@
+(
 s.waitForBoot {
     "Servidor iniciado".postln;
 
     // -----------------------------
-    // Flow Noise atmosférico
+    // Flow Noise y demás SynthDefs
     // -----------------------------
-    SynthDef(\flowNoisePad, { |amp=0.5, cutoff=500, bassFreq=80, out=0|
-        var sig, cutoffMod, bass, ampMod;
-
-        // Modulación lenta tipo pad
-        cutoffMod = cutoff + LFNoise1.kr(0.1).range(-200, 200); // cada 10s aprox.
-        ampMod = amp * (0.8 + LFNoise1.kr(0.05).range(0,0.2)); // respiración lenta
-
-        // Ruido filtrado
-        sig = PinkNoise.ar(0.3) * ampMod;
-        sig = LPF.ar(sig, cutoffMod.clip(50, 4000));
-
-        // Bajo dinámico
+    SynthDef(\flowNoise, { |amp=0.5, cutoff=500, bassFreq=80, out=0|
+        var sig, cutoffLag, bass;
+        cutoffLag = Lag.kr(cutoff, 1);
+        sig = PinkNoise.ar(0.3);
+        sig = LPF.ar(sig, cutoffLag);
         bass = SinOsc.ar(Lag.kr(bassFreq, 0.3), 0, 0.2)
              + SinOsc.ar(Lag.kr(bassFreq*0.5, 0.5), 0, 0.1);
         bass = bass * (0.8 + LFNoise1.kr(0.5).range(0.7, 1.0));
-
         sig = (sig * 0.8) + (bass * 0.8);
-
         Out.ar(out, sig!2);
     }).add;
 
@@ -33,30 +25,34 @@ s.waitForBoot {
 
     SynthDef(\sensorPulseRev, { |freq=100, amp=0.3, dur=0.25, out=0|
         var env, sig, rev;
-        env = EnvGen.kr(Env.perc(0.05, dur, 1, -4));
+        env = EnvGen.kr(Env.perc(0.01, dur, 1, -4));
         sig = SinOsc.ar(freq) * env * amp;
         rev = FreeVerb.ar(sig, mix:0.5, room:0.8, damp:0.5);
         Out.ar(out, rev!2);
     }).add;
 
-    //----------------------------
-    // Pulsos graves hápticos 
-    //----------------------------
-    SynthDef(\beepGrave, { |freq=80, amp=0.4, dur=0.3, out=0|
-        var env, sig;
-        env = EnvGen.kr(Env.perc(0.005, dur, 1, -4), doneAction:2);
-	sig = SinOsc.ar(freq, 0, amp) + SinOsc.ar(freq * 0.5, 0, amp*0.5);
-        sig = sig.tanh * env;
-	sig = LPF.ar(sig, 300);
+    SynthDef(\beepPulseSynth, { |freq=2500, amp=0.2, dur=0.12, wave=0, out=0|
+        var sig;
+        sig = Select.ar(wave, [
+            Saw.ar(freq, amp),
+            Pulse.ar(freq, 0.5, amp)
+        ]);
+        sig = sig * EnvGen.kr(Env.perc(0.001, dur, 1, 0), doneAction: 2);
         Out.ar(out, sig!2);
     }).add;
 
-    // -----------------------------
-    // Instancias iniciales
-    // -----------------------------
     s.sync;
-    ~flowSynth = Synth(\flowNoisePad);
+    ~flowSynth = Synth(\flowNoise);
     ~flowRev = Synth(\flowReverb, [\in, 0, \mix, 0.3, \room, 0.7, \damp, 0.5]);
+
+    // -----------------------------
+    // Grabar todo el audio del servidor
+    // -----------------------------
+    // Creamos la ruta correctamente
+    var recFile = "/home/gatxs/recordings/recording_" ++ Date.getDate.format("%d%m%y_%H%M%S") ++ ".wav";
+    "Grabando en: %".format(recFile).postln;
+
+    s.record(recFile, recLevel: 1, maxTime: 60);
 
     // -----------------------------
     // Listeners OSC
@@ -86,7 +82,7 @@ s.waitForBoot {
             freq = hum.linlin(0, 100, 2500, 3500);
             amp  = hum.linlin(0, 100, 0.15, 0.25);
             dur  = 0.10 + (hum/100*0.08);
-            Synth(\beepGrave, [\freq, freq, \amp, amp, \dur, dur]);
+            Synth(\beepPulseSynth, [\freq, freq, \amp, amp, \dur, dur, \wave, 1]);
         };
     }, '/humedad');
 
@@ -94,12 +90,13 @@ s.waitForBoot {
         var temp, freq, amp, dur;
         if(msg.notEmpty) {
             temp = msg[0].asFloat;
-            freq = temp.linlin(0, 40, 80, 200);
-            amp  = temp.linlin(0, 40, 0.2, 0.45);
+            freq = temp.linlin(0, 40, 2600, 3800);
+            amp  = temp.linlin(0, 40, 0.15, 0.25);
             dur  = 0.10 + (temp/40*0.08);
-            Synth(\beepGrave, [\freq, freq, \amp, amp, \dur, dur]);
+            Synth(\beepPulseSynth, [\freq, freq, \amp, amp, \dur, dur, \wave, 0]);
         };
     }, '/temperatura');
 
-    "Listeners OSC pad atmosférico y beeps grave iniciados".postln;
+    "Listeners OSC y grabación iniciados".postln;
 };
+)
